@@ -54,8 +54,17 @@ from common import read_image, write_image, ROOT_DIR
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 IMAGES_DIR = os.path.join(DATA_DIR, "images")
 
+
+class MeshGrid(torch.nn.Module):
+	def __init__(self, subdivide=1, up=(0., 0., 1.)):
+		pass
+
+	def forward(self, x):
+		pass
+
+
 class Image(torch.nn.Module):
-	def __init__(self, filename, device):
+	def __init__(self, filename, device, subdivide=1):
 		super(Image, self).__init__()
 		self.data = read_image(filename)
 		self.shape = self.data.shape
@@ -108,10 +117,12 @@ if __name__ == "__main__":
 		config = json.load(config_file)
 
 	image = Image(args.image, device)
-	n_channels = image.data.shape[2]
+	n_channels = image.data.shape[2]	
 
 	model = tcnn.NetworkWithInputEncoding(n_input_dims=2, n_output_dims=n_channels, encoding_config=config["encoding"], network_config=config["network"]).to(device)
-	print(model)
+	print(len(model.params))
+
+	num_primitives = config["encoding"].setdefault("n_primitives", 1)
 
 	#===================================================================================================
 	# The following is equivalent to the above, but slower. Only use "naked" tcnn.Encoding and
@@ -135,6 +146,8 @@ if __name__ == "__main__":
 	xv, yv = torch.meshgrid([xs, ys])
 
 	xy = torch.stack((yv.flatten(), xv.flatten())).t()
+
+	print('*** xy: ', xy.shape, xy.max(), xy.min())
 
 	path = f"reference.jpg"
 	print(f"Writing '{path}'... ", end="")

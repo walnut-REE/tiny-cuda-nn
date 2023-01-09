@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import torch
-from tqdm import tqdm
+from tqdm import trange
 import numpy as np
 try:
 	import tinycudann as tcnn
@@ -33,7 +33,7 @@ class TcnnFCBlock(tcnn.Network):
 device = torch.device('cuda:0')
 mlp = TcnnFCBlock(3, 256, 8, 128)
 
-for _ in range(10000):
+for _ in trange(10000):
 	for n, p in mlp.named_parameters():
 		p.grad = None
 	_x = np.random.randint(200, 1000, 1)[0]

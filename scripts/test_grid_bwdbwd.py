@@ -39,7 +39,9 @@ class SDF(nn.Module):
 
 	def forward(self, x):
 		encoded = self.encoder(x).to(dtype=torch.float)
+		print('*** encoded: ', encoded.shape, encoded.max(), encoded.min())
 		sdf = self.decoder(encoded)
+		print('*** sdf: ', sdf.shape, sdf.min(), sdf.max())
 		return sdf
 
 	def forward_with_nablas(self, x):
@@ -53,6 +55,7 @@ class SDF(nn.Module):
 				create_graph=True,
 				retain_graph=True,
 				only_inputs=True)[0]
+		print('*** nablas: ', nablas.shape, nablas.max(), nablas.min())
 		return sdf, nablas
 
 if __name__ == '__main__':
@@ -225,8 +228,8 @@ if __name__ == '__main__':
 
 
 if __name__ == "__main__":
-	# test_()
-	test_train()
+	test_()
+	# test_train()
 	# grad_check()
 	# vis_graph()
 	# check_throw()
