@@ -77,6 +77,17 @@ inline std::string to_string(GridType grid_type) {
 	}
 }
 
+inline std::string to_string(const GridOffsetTable& offset_table) {
+	std::string offset_str("");
+	for (size_t i = 0; i < offset_table.size; i++) {
+		offset_str = offset_str + std::to_string(offset_table.data[i]) + ":";
+	}
+
+	offset_str.pop_back();
+
+	return offset_str;
+}
+
 enum class HashType {
 	Prime,
 	CoherentPrime,
@@ -239,7 +250,7 @@ __global__ void kernel_grid(
 
 	const uint32_t level = blockIdx.y; // <- the level is the same for all threads
 	const uint32_t primtive_idx = (uint32_t)floorf(positions_in(0, i));
-	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1];
+	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1] * N_FEATURES_PER_LEVEL;
 
 	if (max_level_gpu) {
 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
@@ -416,7 +427,7 @@ __global__ void kernel_grid_backward(
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
 	const uint32_t primtive_idx = (uint32_t)floorf(positions_in(0, i));
-	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1];
+	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1] * N_FEATURES_PER_LEVEL;
 
 	if (max_level_gpu) {
 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
@@ -606,7 +617,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
 	const uint32_t primtive_idx = (uint32_t)floorf(positions_in(0, i));
-	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1];
+	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1] * N_FEATURES_PER_LEVEL;
 
 	if (max_level_gpu) {
 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
@@ -733,7 +744,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
 	const uint32_t primtive_idx = (uint32_t)floorf(positions_in(0, i));
-	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1];
+	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1] * N_FEATURES_PER_LEVEL;
 
 	if (max_level_gpu) {
 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
@@ -1409,6 +1420,7 @@ public:
 			{"per_level_scale", m_per_level_scale},
 			{"interpolation", to_string(m_interpolation_type)},
 			{"hash", to_string(HASH_TYPE)},
+			{"offset", to_string(m_offset_table)},
 		};
 
 		if (m_grid_type == GridType::Hash) {
