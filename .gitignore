@@ -5,6 +5,3 @@ build*
 dist
 *.o
 /.vscode
-
-bindings/torch/dependencies
-bindings/torch/src
