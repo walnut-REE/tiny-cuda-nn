@@ -88,6 +88,14 @@ inline std::string to_string(const GridOffsetTable& offset_table) {
 	return offset_str;
 }
 
+inline std::string to_string(const bool* __restrict__ optimizables, const uint32_t n_primitives) {
+	std::string optimizable_str(n_primitives, '1');
+	for (size_t i = 0; i < n_primitives; i++) {
+		optimizable_str[i] = (optimizables[i] ? '1':'0');
+	}
+	return optimizable_str;
+}
+
 enum class HashType {
 	Prime,
 	CoherentPrime,
@@ -416,6 +424,7 @@ __global__ void kernel_grid_backward(
 	const bool stochastic_interpolation,
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
+	const bool* __restrict__ optimizables,
 	GRAD_T* __restrict__ grid_gradient,
 	MatrixView<const float> positions_in,
 	const T* __restrict__ dL_dy
@@ -427,6 +436,7 @@ __global__ void kernel_grid_backward(
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
 	const uint32_t primtive_idx = (uint32_t)floorf(positions_in(0, i));
+	if (!optimizables[primtive_idx]) return;
 	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1] * N_FEATURES_PER_LEVEL;
 
 	if (max_level_gpu) {
@@ -603,6 +613,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	// const bool stochastic_interpolation, // TODO: is this needed?
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
+	const bool* __restrict__ optimizables,
 	// inputs
 	MatrixView<const float> dL_ddLdx,
 	MatrixView<const float> positions_in,
@@ -617,6 +628,7 @@ __global__ void kernel_grid_backward_input_backward_grid(
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
 	const uint32_t primtive_idx = (uint32_t)floorf(positions_in(0, i));
+	if (!optimizables[primtive_idx]) return;
 	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1] * N_FEATURES_PER_LEVEL;
 
 	if (max_level_gpu) {
@@ -729,6 +741,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 	const float* __restrict__ max_level_gpu,
 	const InterpolationType interpolation_type,
 	const GridType grid_type,
+	const bool* __restrict__ optimizables,
 	// inputs
 	MatrixView<const float> dL_ddLdx,
 	MatrixView<const float> positions_in,
@@ -744,6 +757,7 @@ __global__ void kernel_grid_backward_input_backward_input(
 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
 	const uint32_t primtive_idx = (uint32_t)floorf(positions_in(0, i));
+	if (!optimizables[primtive_idx]) return;
 	const uint32_t primtive_offset = primtive_idx * offset_table.data[offset_table.size-1] * N_FEATURES_PER_LEVEL;
 
 	if (max_level_gpu) {
@@ -985,7 +999,8 @@ public:
 		float per_level_scale,
 		bool stochastic_interpolation,
 		InterpolationType interpolation_type,
-		GridType grid_type
+		GridType grid_type,
+		std::string optimizables = ""
 	) :
 	m_n_primitives{n_primitives},
 	m_n_features{n_features},
@@ -998,6 +1013,19 @@ public:
 	{
 		m_n_levels = div_round_up(m_n_features, N_FEATURES_PER_LEVEL);
 		uint32_t offset = 0;
+
+		m_optimizables = new bool[this->m_n_primitives];
+		if (optimizables.empty()) {
+			std::fill_n(m_optimizables, m_n_primitives, true);
+		} else {
+			if (optimizables.size() != m_n_primitives) {
+				throw std::runtime_error(fmt::format("Size of optimizables {} mush be equal with m_n_primitives {}", optimizables.size(), m_n_primitives));
+			}
+			for (size_t i = 0; i < m_n_primitives; i++) { m_optimizables[i] = (optimizables[i] == '0' ? false:true); }
+		}
+
+		cudaMalloc((void**)&m_optimizables_gpu, m_n_primitives*sizeof(bool));
+		cudaMemcpy(m_optimizables_gpu, m_optimizables, m_n_primitives*sizeof(bool), cudaMemcpyHostToDevice);
 
 		if (m_n_levels > MAX_N_LEVELS) {
 			throw std::runtime_error{fmt::format("GridEncoding: m_n_levels={} must be at most MAX_N_LEVELS={}", m_n_levels, MAX_N_LEVELS)};
@@ -1043,6 +1071,11 @@ public:
 		if (n_features % N_FEATURES_PER_LEVEL != 0) {
 			throw std::runtime_error{fmt::format("GridEncoding: n_features={} must be a multiple of N_FEATURES_PER_LEVEL={}", n_features, N_FEATURES_PER_LEVEL)};
 		}
+	}
+
+	~GridEncodingTemplated() {
+		if (this->m_optimizables) { free(this->m_optimizables); }
+		if (this->m_optimizables_gpu) { cudaFree(this->m_optimizables_gpu); }
 	}
 
 	std::unique_ptr<Context> forward_impl(
@@ -1191,6 +1224,7 @@ public:
 				m_stochastic_interpolation,
 				m_interpolation_type,
 				m_grid_type,
+				this->m_optimizables_gpu,
 				grid_gradient,
 				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
 				dL_dy_rm // gradients SoA
@@ -1285,6 +1319,7 @@ public:
 				this->m_max_level_gpu,
 				m_interpolation_type,
 				m_grid_type,
+				this->m_optimizables_gpu,
 				// inputs
 				dL_ddLdinput.view(),
 				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
@@ -1332,6 +1367,7 @@ public:
 				this->m_max_level_gpu,
 				m_interpolation_type,
 				m_grid_type,
+				this->m_optimizables_gpu,
 				// inputs
 				dL_ddLdinput.view(),
 				forward.positions.data() ? forward.positions.view() : input.view(),
@@ -1362,6 +1398,23 @@ public:
 	void set_padded_output_width(uint32_t padded_output_width) override {
 		CHECK_THROW(padded_output_width >= m_n_output_dims);
 		m_n_to_pad = padded_output_width - m_n_output_dims;
+	}
+
+	void set_optimizables(const std::string& optimizables) {
+		if (optimizables.size() != this->m_n_primitives) {
+			throw std::runtime_error{fmt::format("Shape mismatch between optimizables {} and primitives {}.", optimizables.size(), this->m_n_primitives)};
+		}
+
+		if (!this->m_optimizables) {
+			this->m_optimizables = new bool[this->m_n_primitives]{true}; 
+			cudaMalloc((void**)&m_optimizables_gpu, m_n_primitives*sizeof(bool));
+			}
+
+		for (size_t i = 0; i < this->m_n_primitives; i++) {
+			m_optimizables[i] = optimizables[i] == '0' ? false : true;
+		}
+
+		cudaMemcpy(m_optimizables_gpu, m_optimizables, m_n_primitives*sizeof(bool), cudaMemcpyHostToDevice);
 	}
 
 	uint32_t required_output_alignment() const override {
@@ -1421,6 +1474,7 @@ public:
 			{"interpolation", to_string(m_interpolation_type)},
 			{"hash", to_string(HASH_TYPE)},
 			{"offset", to_string(m_offset_table)},
+			{"optimizable", to_string(m_optimizables, m_n_primitives)}
 		};
 
 		if (m_grid_type == GridType::Hash) {
@@ -1437,6 +1491,8 @@ private:
 	};
 
 	uint32_t m_n_primitives = 1;
+	bool* m_optimizables = nullptr;
+	bool* m_optimizables_gpu = nullptr;
 	uint32_t m_n_features;
 	uint32_t m_n_levels;
 	uint32_t m_n_params;
@@ -1460,6 +1516,7 @@ private:
 template <typename T, uint32_t N_FEATURES_PER_LEVEL, HashType HASH_TYPE>
 GridEncoding<T>* create_grid_encoding_templated_2(uint32_t n_dims_to_encode, const json& encoding) {
 	const uint32_t n_primitives = encoding.value("n_primitives", 1);
+	const std::string optimizables = encoding.value("optimizables", "");
 	const uint32_t log2_hashmap_size = (uint32_t)ceilf(std::log2((std::pow(2.0, encoding.value("log2_hashmap_size", 19u)) / (float)n_primitives)));
 	
 	const std::string encoding_type = encoding.value("otype", "Grid");
@@ -1484,6 +1541,7 @@ GridEncoding<T>* create_grid_encoding_templated_2(uint32_t n_dims_to_encode, con
 	encoding.value("stochastic_interpolation", false), \
 	string_to_interpolation_type(encoding.value("interpolation", "Linear")), \
 	string_to_grid_type(encoding.value("type", default_type)), \
+	optimizables, \
 
 	// If higher-dimensional hash encodings are desired, corresponding switch cases can be added
 	switch (n_dims_to_encode) {
