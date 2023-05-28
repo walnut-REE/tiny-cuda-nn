@@ -40,9 +40,9 @@
 TCNN_NAMESPACE_BEGIN
 
 template <typename T, int WIDTH>
-class FullyFusedMLP : public Network<T> {
+class KiloMLP : public Network<T> {
 public:
-	FullyFusedMLP(uint32_t input_width, uint32_t output_width, uint32_t n_hidden_layers, Activation activation, Activation output_activation);
+	KiloMLP(uint32_t input_width, uint32_t output_width, uint32_t n_primitives, uint32_t n_hidden_layers, Activation activation, Activation output_activation);
 	
 	void inference_mixed_precision_impl(cudaStream_t stream, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output, bool use_inference_params = true) override;
 
@@ -136,7 +136,8 @@ public:
 
 	json hyperparams() const override {
 		return {
-			{"otype", "FullyFusedMLP"},
+			{"otype", "KiloMLP"},
+			{"n_primitives", m_n_primitives},
 			{"activation", to_string(m_activation)},
 			{"output_activation", to_string(m_output_activation)},
 			{"n_neurons", m_network_width},
@@ -158,6 +159,7 @@ private:
 	uint32_t m_network_width;
 	uint32_t m_output_width;
 	uint32_t m_padded_output_width;
+	uint32_t m_n_primitives;
 
 	Activation m_activation;
 	Activation m_output_activation;
